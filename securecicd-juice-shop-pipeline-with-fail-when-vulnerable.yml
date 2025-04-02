@@ -1,0 +1,54 @@
+trigger:
+  - main
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+steps:
+  # Checkout the repository
+  - checkout: self
+    fetchDepth: 0
+
+  # Install Node.js and update dependencies in juice-shop/
+  - script: |
+      # Install Node.js
+      curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
+      sudo apt-get install -y nodejs
+
+      # Navigate to juice-shop folder
+      cd juice-shop
+
+      # Update dependencies
+      npm install -g npm
+      npm ci
+      npm update
+    displayName: 'Update Node.js Dependencies'
+
+  # Build and Tag Docker Image with ACR name
+  - task: Docker@2
+    displayName: 'Build and Tag Docker Image'
+    inputs:
+      containerRegistry: 'juiceshop-acr'  # Your ACR service connection
+      repository: 'juice-shop'
+      command: 'build'
+      Dockerfile: 'juice-shop/Dockerfile'
+      tags: 'latest'
+      arguments: '--tag juiceshopacr.azurecr.io/juice-shop:latest'  # Explicitly tag with ACR name
+
+  # Scan Image with Trivy (use local image)
+  - script: |
+      sudo apt-get update
+      sudo apt-get install -y wget
+      wget https://github.com/aquasecurity/trivy/releases/download/v0.50.1/trivy_0.50.1_Linux-64bit.deb
+      sudo dpkg -i trivy_0.50.1_Linux-64bit.deb
+      trivy image --severity HIGH,CRITICAL --exit-code 1 juiceshopacr.azurecr.io/juice-shop:latest
+    displayName: 'Scan Image with Trivy'
+
+  # Push Image to ACR
+  - task: Docker@2
+    displayName: 'Push Docker Image to ACR'
+    inputs:
+      containerRegistry: 'juiceshop-acr'
+      repository: 'juice-shop'
+      command: 'push'
+      tags: 'latest'
